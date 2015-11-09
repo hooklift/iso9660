@@ -10,41 +10,55 @@
 package isofs
 
 import (
+	"io"
 	"os"
+	"strings"
 	"time"
 )
 
-// fileStat represents a concrete implementation of os.FileInfo interface for
+// FileStat represents a concrete implementation of os.FileInfo interface for
 // accessing ISO9660 file stats
-type fileStat struct{}
+type FileStat struct {
+	DirectoryRecord
+	FileID string
+	// We have the raw image here only to be able to access file extents
+	image io.ReadSeeker
+}
 
 // Name returns the file's name.
-func (fi *fileStat) Name() string {
-	return ""
+func (fi *FileStat) Name() string {
+	return strings.TrimSpace(fi.FileID)
 }
 
 // Size returns the file size in bytes
-func (fi *fileStat) Size() int64 {
+func (fi *FileStat) Size() int64 {
 	return 0
 }
 
 // Mode returns file's mode and permissions bits.
-func (fi *fileStat) Mode() os.FileMode {
-	return os.FileMode(0)
+func (fi *FileStat) Mode() os.FileMode {
+	return os.FileMode(0740)
 }
 
 // ModTime returns file's modification time.
-func (fi *fileStat) ModTime() time.Time {
+func (fi *FileStat) ModTime() time.Time {
 	return time.Now()
 }
 
 // IsDir tells whether the file is a directory or not.
-func (fi *fileStat) IsDir() bool {
+func (fi *FileStat) IsDir() bool {
+	// if (fi.FileFlags & isDirectory) == 0 {
+	// 	return true
+	// }
 	return false
 }
 
 // Sys returns io.Reader instance pointing to the file's content if it is not a directory, nil otherwise.
-func (fi *fileStat) Sys() interface{} {
+func (fi *FileStat) Sys() interface{} {
+	if fi.IsDir() {
+		return nil
+	}
+
 	return nil
 }
 
@@ -58,6 +72,9 @@ const (
 	// found starting at sector 0x10
 	dataAreaSector = 0x10
 	sectorSize     = 2048
+	// File Flags
+	isDirectory = 1
+	isFile      = 2
 )
 
 // VolumeDescriptor identify the volume, the partitions recorded on the volume,
@@ -76,11 +93,11 @@ type VolumeDescriptor struct {
 	// 3: Volume Partition Descriptor
 	// 4-254: Reserved
 	// 255: Volume Descriptor Set Terminator
-	Type int `struc:"uint8"`
+	Type byte
 	// Always "CD001".
-	StandardID string `struc:"[5]byte"`
+	StandardID [5]byte
 	//Volume Descriptor Version (0x01).
-	Version int `struc:"uint8"`
+	Version byte
 }
 
 // BootRecord identifies a system which can recognize and act upon the content
@@ -89,8 +106,8 @@ type VolumeDescriptor struct {
 // for an application.
 type BootRecord struct {
 	VolumeDescriptor
-	SystemID  string `struc:"[32]byte"`
-	ID        string `struc:"[32]byte"`
+	SystemID  [32]byte
+	ID        [32]byte
 	SystemUse [1977]byte
 }
 
@@ -99,6 +116,158 @@ type Terminator struct {
 	VolumeDescriptor
 	// All bytes of this field are set to (00).
 	Reserved [2041]byte
+}
+
+// PrimaryVolumePart1 represents the Primary Volume Descriptor first half, before the
+// root directory record. We are only reading big-endian values so placeholders
+// are used for little-endian ones.
+type PrimaryVolumePart1 struct {
+	VolumeDescriptor
+	// Unused
+	_ byte // 00
+	// The name of the system that can act upon sectors 0x00-0x0F for the volume.
+	SystemID [32]byte
+	// Identification of this volume.
+	ID [32]byte
+	//Unused2
+	_ [8]byte
+	// Amount of data available on the CD-ROM. Ignores little-endian order.
+	// Takes big-endian encoded value.
+	_               int32
+	VolumeSpaceSize int32
+	Unused2         [32]byte
+	// The size of the set in this logical volume (number of disks). Ignores
+	// little-endian order. Takes big-endian encoded value.
+	_             int16
+	VolumeSetSize int16
+
+	// The number of this disk in the Volume Set. Ignores little-endian order.
+	// Takes big-endian encoded value.
+	_               int16
+	VolumeSeqNumber int16
+	// The size in bytes of a logical block. NB: This means that a logical block
+	// on a CD could be something other than 2 KiB!
+	_              int16
+	LogicalBlkSize int16
+	// The size in bytes of the path table. Ignores little-endian order.
+	// Takes big-endian encoded value.
+	_             int32
+	PathTableSize int32
+	// LBA location of the path table. The path table pointed to contains only
+	// little-endian values.
+	_ int32
+	// LBA location of the optional path table. The path table pointed to contains
+	// only little-endian values. Zero means that no optional path table exists.
+	_ int32
+	// LBA location of the path table. The path table pointed to contains
+	// only big-endian values.
+	LocMPathTable int32
+	// LBA location of the optional path table. The path table pointed to contains
+	// only big-endian values. Zero means that no optional path table exists.
+	LocOptMPathTable int32
+}
+
+// DirectoryRecord describes the characteristics of a file or directory,
+// beginning with a length octet describing the size of the entire entry.
+// Entries themselves are of variable length, up to 255 octets in size.
+// Attributes for the file described by the directory entry are stored in the
+// directory entry itself (unlike UNIX).
+// The root directory entry is a variable length object, so that the name can be of variable length.
+//
+// Important: before each entry there can be "fake entries" to support the Long File Name.
+//
+// Even if a directory spans multiple sectors, the directory entries are not
+// permitted to cross the sector boundary (unlike the path table). Where there
+// is not enough space to record an entire directory entry at the end of a sector,
+// that sector is zero-padded and the next consecutive sector is used.
+// Unfortunately, the date/time format is different from that used in the Primary
+// Volume Descriptor.
+type DirectoryRecord struct {
+	// Extended Attribute Record length, stored at the beginning of
+	// the file's extent.
+	ExtendedAttrLen byte
+	// Location of extent (Logical Block Address) in both-endian format.
+	_              uint32
+	ExtentLocation uint32
+	// Data length (size of extent) in both-endian format.
+	_            uint32
+	ExtentLength uint32
+	// Date and the time of the day at which the information in the Extent
+	// described by the Directory Record was recorded.
+	RecordedTime [7]byte
+	// If this Directory Record identifies a directory then bit positions 2, 3
+	// and 7 shall be set to ZERO. If no Extended Attribute Record is associated
+	// with the File Section identified by this Directory Record then bit
+	// positions 3 and 4 shall be set to ZERO. -- 9.1.6
+	FileFlags byte
+	// File unit size for files recorded in interleaved mode, zero otherwise.
+	FileUnitSize byte
+	// Interleave gap size for files recorded in interleaved mode, zero otherwise.
+	InterleaveGapSize byte
+	// Volume sequence number - the volume that this extent is recorded on, in
+	// 16 bit both-endian format.
+	_               uint16
+	VolumeSeqNumber uint16
+	// Length of file identifier (file name). This terminates with a ';'
+	// character followed by the file ID number in ASCII coded decimal ('1').
+	FileIDLength byte
+	// // The interpretation of this field depends as follows on the setting of the
+	// // Directory bit of the File Flags field. If set to ZERO, it shall mean:
+	// //
+	// // − The field shall specify an identification for the file.
+	// // − The characters in this field shall be d-characters or d1-characters, SEPARATOR 1, SEPARATOR 2.
+	// // − The field shall be recorded as specified in 7.5. If set to ONE, it shall mean:
+	// // − The field shall specify an identification for the directory.
+	// // − The characters in this field shall be d-characters or d1-characters, or only a (00) byte, or only a (01) byte.
+	// // − The field shall be recorded as specified in 7.6.
+	//fileID string
+}
+
+// PrimaryVolumePart2 represents the Primary Volume Descriptor half after the
+// root directory record.
+type PrimaryVolumePart2 struct {
+	// Identifier of the volume set of which this volume is a member.
+	VolumeSetID [128]byte
+	// The volume publisher. For extended publisher information, the first byte
+	// should be 0x5F, followed by the filename of a file in the root directory.
+	// If not specified, all bytes should be 0x20.
+	PublisherID [128]byte
+	// The identifier of the person(s) who prepared the data for this volume.
+	// For extended preparation information, the first byte should be 0x5F,
+	// followed by the filename of a file in the root directory. If not specified,
+	// all bytes should be 0x20.
+	DataPreparerID [128]byte
+	// Identifies how the data are recorded on this volume. For extended information,
+	// the first byte should be 0x5F, followed by the filename of a file in the root
+	// directory. If not specified, all bytes should be 0x20.
+	AppID [128]byte
+	// Filename of a file in the root directory that contains copyright
+	// information for this volume set. If not specified, all bytes should be 0x20.
+	CopyrightFileID [37]byte
+	// Filename of a file in the root directory that contains abstract information
+	// for this volume set. If not specified, all bytes should be 0x20.
+	AbstractFileID [37]byte
+	// Filename of a file in the root directory that contains bibliographic
+	// information for this volume set. If not specified, all bytes should be 0x20.
+	BibliographicFileID [37]byte
+	// The date and time of when the volume was created.
+	CreationTime [17]byte
+	// The date and time of when the volume was modified.
+	ModificationTime [17]byte
+	// The date and time after which this volume is considered to be obsolete.
+	// If not specified, then the volume is never considered to be obsolete.
+	ExpirationTime [17]byte
+	// The date and time after which the volume may be used. If not specified,
+	// the volume may be used immediately.
+	EffectiveTime [17]byte
+	// The directory records and path table version (always 0x01).
+	FileStructVersion byte
+	// Reserved. Always 0x00.
+	_ byte
+	// Contents not defined by ISO 9660.
+	AppUse [512]byte
+	// Reserved by ISO.
+	_ [653]byte
 }
 
 // PrimaryVolume descriptor acts much like the superblock of the UNIX filesystem, providing
@@ -114,80 +283,9 @@ type Terminator struct {
 // Since ISO 9660 works by segmenting the CD-ROM into logical blocks, the size
 // of these blocks is found in the primary volume descriptor as well.
 type PrimaryVolume struct {
-	VolumeDescriptor
-	Unused byte `struc:"int8"` // 00
-	// The name of the system that can act upon sectors 0x00-0x0F for the volume.
-	SystemID string `struc:"[32]byte"`
-	// Identification of this volume.
-	ID      string `struc:"[32]byte"`
-	Unused1 byte
-	// Amount of data available on the CD-ROM
-	VolumeSpaceSize int `struc:"int32"`
-	Unused2         [32]byte
-	// The size of the set in this logical volume (number of disks).
-	VolumeSetSize int `struc:"int16"`
-	// The number of this disk in the Volume Set.
-	VolumeSeqNumber int `struc:"int16"`
-	// The size in bytes of a logical block. NB: This means that a logical block
-	// on a CD could be something other than 2 KiB!
-	LogicalBlkSize int `struc:"int16"`
-	// The size in bytes of the path table.
-	PathTableSize int `struc:"int32"`
-	// LBA location of the path table. The path table pointed to contains only little-endian values.
-	LocLPathTable int `struc:"int32"`
-	// LBA location of the optional path table. The path table pointed to contains
-	// only little-endian values. Zero means that no optional path table exists.
-	LocOptLPathTable int `struc:"int32"`
-	// LBA location of the path table. The path table pointed to contains only big-endian values.
-	LocMPathTable int `struc:"int32"`
-	// LBA location of the optional path table. The path table pointed to contains
-	// only big-endian values. Zero means that no optional path table exists.
-	LocOptMPathTable int `struc:"int32"`
-	// Note that this is not an LBA address, it is the actual Directory Record,
-	// which contains a zero-length Directory Identifier, hence the fixed 34 byte size.
-	RootDirRecord DirectoryRecord
-	// Identifier of the volume set of which this volume is a member.
-	VolumeSetID string `struc:"[128]byte"`
-	// The volume publisher. For extended publisher information, the first byte
-	// should be 0x5F, followed by the filename of a file in the root directory.
-	// If not specified, all bytes should be 0x20.
-	PublisherID string `struc:"[128]byte"`
-	// The identifier of the person(s) who prepared the data for this volume.
-	// For extended preparation information, the first byte should be 0x5F,
-	// followed by the filename of a file in the root directory. If not specified,
-	// all bytes should be 0x20.
-	DataPreparerID string `struc:"[128]byte"`
-	// Identifies how the data are recorded on this volume. For extended information,
-	// the first byte should be 0x5F, followed by the filename of a file in the root
-	// directory. If not specified, all bytes should be 0x20.
-	AppID string `struc:"[128]byte"`
-	// Filename of a file in the root directory that contains copyright
-	// information for this volume set. If not specified, all bytes should be 0x20.
-	CopyrightFileID string `struc:"[37]byte"`
-	// Filename of a file in the root directory that contains abstract information
-	// for this volume set. If not specified, all bytes should be 0x20.
-	AbstractFileID string `struc:"[37]byte"`
-	// Filename of a file in the root directory that contains bibliographic
-	// information for this volume set. If not specified, all bytes should be 0x20.
-	BibliographicFileID string `struc:"[37]byte"`
-	// The date and time of when the volume was created.
-	CreationTime Timestamp
-	// The date and time of when the volume was modified.
-	ModificationTime Timestamp
-	// The date and time after which this volume is considered to be obsolete.
-	// If not specified, then the volume is never considered to be obsolete.
-	ExpirationTime Timestamp
-	// The date and time after which the volume may be used. If not specified,
-	// the volume may be used immediately.
-	EffectiveTime Timestamp
-	// The directory records and path table version (always 0x01).
-	FileStructVersion int `struc:"uint8"`
-	// Always 0x00.
-	Reserved byte
-	// Contents not defined by ISO 9660.
-	AppUse [512]byte
-	// Reserved by ISO.
-	Reserved2 byte
+	PrimaryVolumePart1
+	DirectoryRecord DirectoryRecord
+	PrimaryVolumePart2
 }
 
 // SupplementaryVolume is used by Joliet.
@@ -236,20 +334,6 @@ type PartitionVolume struct {
 	SystemUse [1960]byte
 }
 
-// Datetime ...
-type Datetime struct {
-	// Number of years since 1900
-	YearsSince1900 int `struc:"uint8"`
-	// Month of the year from 1 to 12
-	Month int `struc:"uint8"`
-	// Day of the month from 1 to 31
-	DayOfMonth int `struc:"uint8"`
-	Hour       int `struc:"uint8"`
-	Minute     int `struc:"uint8"`
-	Second     int `struc:"uint8"`
-	GMTOffset  int `struc:"int8"`
-}
-
 // Timestamp ...
 type Timestamp struct {
 	Year        int `struc:"[4]byte"`
@@ -259,62 +343,7 @@ type Timestamp struct {
 	Minute      int `struc:"[2]byte"`
 	Second      int `struc:"[2]byte"`
 	Millisecond int `struc:"[2]byte"`
-	GMTOffset   int `struc:"int8"`
-}
-
-// DirectoryRecord describes the characteristics of a file or directory,
-// beginning with a length octet describing the size of the entire entry.
-// Entries themselves are of variable length, up to 255 octets in size.
-// Attributes for the file described by the directory entry are stored in the
-// directory entry itself (unlike UNIX).
-// The root directory entry is a variable length object, so that the name can be of variable length.
-//
-// Important: before each entry there can be "fake entries" to support the Long File Name.
-//
-// Even if a directory spans multiple sectors, the directory entries are not
-// permitted to cross the sector boundary (unlike the path table). Where there
-// is not enough space to record an entire directory entry at the end of a sector,
-// that sector is zero-padded and the next consecutive sector is used.
-// Unfortunately, the date/time format is different from that used in the Primary
-// Volume Descriptor.
-type DirectoryRecord struct {
-	// Length of Directory Record.
-	Length int `struc:"uint8"`
-	// Extended Attribute Record length, stored at the beginning of
-	// the file's extent.
-	ExtendedAttrLen int `struc:"uint8"`
-	// Location of extent (Logical Block Address) in both-endian format.
-	ExtentLocation int `struc:"int32"`
-	// Data length (size of extent) in both-endian format.
-	ExtentLength int `struc:"int32"`
-	// Date and the time of the day at which the information in the Extent
-	// described by the Directory Record was recorded.
-	RecordedTime Datetime
-	// If this Directory Record identifies a directory then bit positions 2, 3
-	// and 7 shall be set to ZERO. If no Extended Attribute Record is associated
-	// with the File Section identified by this Directory Record then bit
-	// positions 3 and 4 shall be set to ZERO. -- 9.1.6
-	FileFlags int `struc:"int8"`
-	// File unit size for files recorded in interleaved mode, zero otherwise.
-	FileUnitSize int `struc:"uint8"`
-	// Interleave gap size for files recorded in interleaved mode, zero otherwise.
-	InterleaveGapSize int `struc:"uint8"`
-	// Volume sequence number - the volume that this extent is recorded on, in
-	// 16 bit both-endian format.
-	VolumeSeqNumber int `struc:"int16"`
-	// Length of file identifier (file name). This terminates with a ';'
-	// character followed by the file ID number in ASCII coded decimal ('1').
-	NameLength int `struc:"uint8,sizeof=Name"`
-	// The interpretation of this field depends as follows on the setting of the
-	// Directory bit of the File Flags field. If set to ZERO, it shall mean:
-	//
-	// − The field shall specify an identification for the file.
-	// − The characters in this field shall be d-characters or d1-characters, SEPARATOR 1, SEPARATOR 2.
-	// − The field shall be recorded as specified in 7.5. If set to ONE, it shall mean:
-	// − The field shall specify an identification for the directory.
-	// − The characters in this field shall be d-characters or d1-characters, or only a (00) byte, or only a (01) byte.
-	// − The field shall be recorded as specified in 7.6.
-	Name string
+	GMTOffset   int `struc:"uint8"`
 }
 
 // ExtendedAttrRecord are simply a way to extend the attributes of files.
