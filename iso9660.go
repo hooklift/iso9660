@@ -1,4 +1,4 @@
-// Package isofs implements ECMA-119 standard, also known as ISO9660.
+// Package iso9660 implements ECMA-119 standard, also known as ISO 9660.
 // References:
 // * https://en.wikipedia.org/wiki/ISO_9660
 // * http://alumnus.caltech.edu/~pje/iso9660.html
@@ -7,7 +7,7 @@
 // * http://www.drdobbs.com/database/inside-the-iso-9660-filesystem-format/184408899
 // * http://www.cdfs.com
 // * http://wiki.osdev.org/ISO_9660
-package isofs
+package iso9660
 
 import (
 	"io"

@@ -1,1 +1,1 @@
-package isofs
+package iso9660

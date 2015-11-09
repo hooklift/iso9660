@@ -1,4 +1,4 @@
-package isofs
+package iso9660
 
 import (
 	"os"

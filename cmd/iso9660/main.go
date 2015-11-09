@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	isofs "github.com/hooklift/iso"
 )
 
 func main() {
@@ -16,7 +14,7 @@ func main() {
 		panic(err)
 	}
 
-	r, err := isofs.NewReader(file)
+	r, err := iso9660.NewReader(file)
 	if err != nil {
 		panic(err)
 	}
