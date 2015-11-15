@@ -137,7 +137,11 @@ func (r *Reader) Next() (os.FileInfo, error) {
 		r.queue.Dequeue()
 	}
 
-	if drecord.IsDir() && drecord.fileID != "" {
+	if drecord.fileID == "" {
+		return r.Next()
+	}
+
+	if drecord.IsDir() {
 		r.queue.Enqueue(drecord)
 	} else {
 		drecord.image = r.image
