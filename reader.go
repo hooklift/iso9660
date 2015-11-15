@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/c4milo/gotoolkit"
 )
 
 var (
@@ -19,8 +21,16 @@ var (
 // Reader defines the state of the ISO9660 image reader. It needs to be instantiated
 // from its constructor.
 type Reader struct {
+	// File descriptor to the opened ISO image
 	image io.ReadSeeker
-	pvd   PrimaryVolume
+	// Copy of unencoded Primary Volume Descriptor
+	pvd PrimaryVolume
+	// Queue used to walk through file system iteratively
+	queue gotoolkit.Queue
+	// Current sector
+	sector uint32
+	// Current bytes read from current sector.
+	read uint32
 }
 
 // NewReader creates a new ISO9660 reader.
@@ -41,12 +51,15 @@ func NewReader(rs io.ReadSeeker) (*Reader, error) {
 		}
 
 		if volDesc.Type == primaryVol {
+			// backs up to the beginning of the sector again in order to unpack
+			// the entire primary volume descriptor more easily.
 			if _, err := rs.Seek(offset, os.SEEK_SET); err != nil {
 				return nil, ErrCorruptedImage(err)
 			}
 
 			reader := new(Reader)
 			reader.image = rs
+			reader.queue = new(gotoolkit.SliceQueue)
 
 			if err := reader.unpackPVD(); err != nil {
 				return nil, ErrCorruptedImage(err)
@@ -62,20 +75,126 @@ func NewReader(rs io.ReadSeeker) (*Reader, error) {
 	}
 }
 
-// Next moves onto the next directory record if there is any
+// Next moves onto the next directory record using breadth-first search one step
+// at the time. It first moves
 func (r *Reader) Next() (os.FileInfo, error) {
 	if r == nil {
-		panic("missing reader instance")
+		panic("missing reader instance. Use the constructor to create a Reader instance.")
 	}
 
-	drecord := new(DirectoryRecord)
-	if err := r.unpackDRecord(drecord); err != nil {
-		return nil, err
+	if r.queue.IsEmpty() {
+		return nil, io.EOF
 	}
 
-	fi := &FileStat{image: r.image, DirectoryRecord: *drecord}
+	// We only dequeue the directory when it does not contain more children
+	// or when it is empty and there is no children to go over.
+	item, err := r.queue.Peek()
+	if err != nil {
+		panic(err)
+	}
+	fi := item.(FileStat)
 
-	return fi, nil
+	fmt.Println(r.sector)
+	// If there is no more entries in the current directory, dequeue it
+	// and move on the next directory in the queue.
+	if r.read > fi.ExtentLengthBE {
+		r.read = 0
+		r.queue.Dequeue()
+		r.sector = 0
+		return &fi, nil
+	}
+
+	if r.sector == 0 {
+		r.sector = fi.ExtentLocationBE
+	}
+
+	var drecord FileStat
+	var len byte
+	// We need this loop to skip parent and self directories: .. and .
+	for {
+		// If we are at the end of the sector, move onto the next one.
+		if (r.read % sectorSize) == 0 {
+			r.sector++
+			_, err := r.image.Seek(int64(r.sector*sectorSize), os.SEEK_SET)
+			if err != nil {
+				return nil, ErrCorruptedImage(err)
+			}
+		}
+
+		if len, err = r.unpackDRecord(&drecord); err != nil && err != io.EOF {
+			return nil, ErrCorruptedImage(err)
+		}
+		r.read += uint32(len)
+
+		if err == io.EOF {
+			// directory record is empty, sector lost, move onto next sector.
+			rsize := (sectorSize - (r.read % sectorSize))
+			buf := make([]byte, rsize)
+			if err := binary.Read(r.image, binary.BigEndian, buf); err != nil {
+				return nil, ErrCorruptedImage(err)
+			}
+			r.read += rsize
+		}
+
+		if drecord.fileID != "\x00" && drecord.fileID != "\x01" {
+			if drecord.IsDir() {
+				r.queue.Enqueue(drecord)
+			} else {
+				drecord.image = r.image
+			}
+			break
+		}
+	}
+
+	return &drecord, nil
+}
+
+// unpackDRecord unpacks directory record bits into Go's struct
+func (r *Reader) unpackDRecord(fi *FileStat) (byte, error) {
+	// Gets the directory record length
+	var len byte
+	if err := binary.Read(r.image, binary.BigEndian, &len); err != nil {
+		return len, ErrCorruptedImage(err)
+	}
+
+	if len == 0 {
+		return len + 1, io.EOF
+	}
+
+	// Reads directory record into Go struct
+	var drecord DirectoryRecord
+	if err := binary.Read(r.image, binary.BigEndian, &drecord); err != nil {
+		return len, ErrCorruptedImage(err)
+	}
+
+	fi.DirectoryRecord = drecord
+	// Gets the name
+	name := make([]byte, drecord.FileIDLength)
+	if err := binary.Read(r.image, binary.BigEndian, name); err != nil {
+		return len, ErrCorruptedImage(err)
+	}
+	fi.fileID = string(name)
+
+	// Padding field as per section 9.1.12 in ECMA-119
+	if (drecord.FileIDLength % 2) == 0 {
+		var zero byte
+		if err := binary.Read(r.image, binary.BigEndian, &zero); err != nil {
+			return len, ErrCorruptedImage(err)
+		}
+	}
+
+	// System use field as per section 9.1.13 in ECMA-119
+	// Directory record has 34 bytes in addition to the name's
+	// variable length and the padding field mentioned in section 9.1.12
+	totalLen := 34 + drecord.FileIDLength - (drecord.FileIDLength % 2)
+	sysUseLen := int64(len - totalLen)
+	if sysUseLen > 0 {
+		sysData := make([]byte, sysUseLen)
+		if err := binary.Read(r.image, binary.BigEndian, sysData); err != nil {
+			return len, ErrCorruptedImage(err)
+		}
+	}
+	return len, nil
 }
 
 // unpackPVD unpacks Primary Volume Descriptor in three phases. This is
@@ -90,11 +209,12 @@ func (r *Reader) unpackPVD() error {
 	r.pvd.PrimaryVolumePart1 = pvd1
 
 	// Unpack root directory record
-	var drecord DirectoryRecord
-	if err := r.unpackDRecord(&drecord); err != nil {
+	var drecord FileStat
+	if _, err := r.unpackDRecord(&drecord); err != nil {
 		return ErrCorruptedImage(err)
 	}
-	r.pvd.DirectoryRecord = drecord
+	r.pvd.DirectoryRecord = drecord.DirectoryRecord
+	r.queue.Enqueue(drecord)
 
 	// Unpack second half
 	var pvd2 PrimaryVolumePart2
@@ -103,46 +223,5 @@ func (r *Reader) unpackPVD() error {
 	}
 	r.pvd.PrimaryVolumePart2 = pvd2
 
-	return nil
-}
-
-func (r *Reader) unpackDRecord(drecord *DirectoryRecord) error {
-	var len byte
-	if err := binary.Read(r.image, binary.BigEndian, &len); err != nil {
-		return ErrCorruptedImage(err)
-	}
-
-	if len == 0 {
-		return nil
-	}
-
-	if err := binary.Read(r.image, binary.BigEndian, drecord); err != nil {
-		return ErrCorruptedImage(err)
-	}
-
-	name := make([]byte, drecord.FileIDLength)
-	if err := binary.Read(r.image, binary.BigEndian, name); err != nil {
-		return ErrCorruptedImage(err)
-	}
-	//drecord.FileID = string(name)
-	//fmt.Printf("name: ->%s<-\n", name)
-
-	//Padding field as per section 9.1.12 in ECMA-119
-	if (drecord.FileIDLength % 2) == 0 {
-		var zero byte
-		if err := binary.Read(r.image, binary.BigEndian, &zero); err != nil {
-			return ErrCorruptedImage(err)
-		}
-	}
-
-	// System use field as per section 9.1.13 in ECMA-119
-	totalLen := 34 + drecord.FileIDLength - (drecord.FileIDLength % 2)
-	sysUseLen := int64(len - totalLen)
-	if sysUseLen > 0 {
-		sysData := make([]byte, sysUseLen)
-		if err := binary.Read(r.image, binary.BigEndian, sysData); err != nil {
-			return ErrCorruptedImage(err)
-		}
-	}
 	return nil
 }

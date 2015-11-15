@@ -10,6 +10,8 @@
 package iso9660
 
 import (
+	"bytes"
+	"encoding/binary"
 	"io"
 	"os"
 	"strings"
@@ -20,14 +22,14 @@ import (
 // accessing ISO9660 file stats
 type FileStat struct {
 	DirectoryRecord
-	FileID string
+	fileID string
 	// We have the raw image here only to be able to access file extents
 	image io.ReadSeeker
 }
 
 // Name returns the file's name.
 func (fi *FileStat) Name() string {
-	return strings.TrimSpace(fi.FileID)
+	return strings.TrimSpace(fi.fileID)
 }
 
 // Size returns the file size in bytes
@@ -47,9 +49,9 @@ func (fi *FileStat) ModTime() time.Time {
 
 // IsDir tells whether the file is a directory or not.
 func (fi *FileStat) IsDir() bool {
-	// if (fi.FileFlags & isDirectory) == 0 {
-	// 	return true
-	// }
+	if (fi.FileFlags & isDirectory) == 0 {
+		return true
+	}
 	return false
 }
 
@@ -59,7 +61,32 @@ func (fi *FileStat) Sys() interface{} {
 		return nil
 	}
 
-	return nil
+	// Saves the current position within the ISO image. This is so we can
+	// restore it once the file content is read. By doing this we allow
+	// reader.Next() to keep working normally.
+	curOffset, err := fi.image.Seek(0, os.SEEK_CUR)
+	if err != nil {
+		panic(err)
+	}
+
+	buf := make([]byte, fi.ExtentLengthBE)
+	_, err = fi.image.Seek(int64(fi.ExtentLocationBE*fi.ExtentLengthBE), os.SEEK_SET)
+	if err != nil {
+		panic(err)
+	}
+
+	err = binary.Read(fi.image, binary.BigEndian, &buf)
+	if err != nil {
+		panic(err)
+	}
+
+	// Restores original position within the ISO image after reading file's content.
+	_, err = fi.image.Seek(curOffset, os.SEEK_SET)
+	if err != nil {
+		panic(err)
+	}
+
+	return bytes.NewReader(buf)
 }
 
 const (
@@ -133,38 +160,37 @@ type PrimaryVolumePart1 struct {
 	_ [8]byte
 	// Amount of data available on the CD-ROM. Ignores little-endian order.
 	// Takes big-endian encoded value.
-	_               int32
-	VolumeSpaceSize int32
-	Unused2         [32]byte
+	VolumeSpaceSizeLE int32
+	VolumeSpaceSizeBE int32
+	Unused2           [32]byte
 	// The size of the set in this logical volume (number of disks). Ignores
 	// little-endian order. Takes big-endian encoded value.
-	_             int16
-	VolumeSetSize int16
-
+	VolumeSetSizeLE int16
+	VolumeSetSizeBE int16
 	// The number of this disk in the Volume Set. Ignores little-endian order.
 	// Takes big-endian encoded value.
-	_               int16
-	VolumeSeqNumber int16
+	VolumeSeqNumberLE int16
+	VolumeSeqNumberBE int16
 	// The size in bytes of a logical block. NB: This means that a logical block
 	// on a CD could be something other than 2 KiB!
-	_              int16
-	LogicalBlkSize int16
+	LogicalBlkSizeLE int16
+	LogicalBlkSizeBE int16
 	// The size in bytes of the path table. Ignores little-endian order.
 	// Takes big-endian encoded value.
-	_             int32
-	PathTableSize int32
+	PathTableSizeLE int32
+	PathTableSizeBE int32
 	// LBA location of the path table. The path table pointed to contains only
 	// little-endian values.
-	_ int32
+	LocPathTableLE int32
 	// LBA location of the optional path table. The path table pointed to contains
 	// only little-endian values. Zero means that no optional path table exists.
-	_ int32
+	LocOptPathTableLE int32
 	// LBA location of the path table. The path table pointed to contains
 	// only big-endian values.
-	LocMPathTable int32
+	LocPathTableBE int32
 	// LBA location of the optional path table. The path table pointed to contains
 	// only big-endian values. Zero means that no optional path table exists.
-	LocOptMPathTable int32
+	LocOptPathTableBE int32
 }
 
 // DirectoryRecord describes the characteristics of a file or directory,
@@ -187,11 +213,11 @@ type DirectoryRecord struct {
 	// the file's extent.
 	ExtendedAttrLen byte
 	// Location of extent (Logical Block Address) in both-endian format.
-	_              uint32
-	ExtentLocation uint32
+	ExtentLocationLE uint32
+	ExtentLocationBE uint32
 	// Data length (size of extent) in both-endian format.
-	_            uint32
-	ExtentLength uint32
+	ExtentLengthLE uint32
+	ExtentLengthBE uint32
 	// Date and the time of the day at which the information in the Extent
 	// described by the Directory Record was recorded.
 	RecordedTime [7]byte
@@ -206,21 +232,21 @@ type DirectoryRecord struct {
 	InterleaveGapSize byte
 	// Volume sequence number - the volume that this extent is recorded on, in
 	// 16 bit both-endian format.
-	_               uint16
-	VolumeSeqNumber uint16
+	VolumeSeqNumberLE uint16
+	VolumeSeqNumberBE uint16
 	// Length of file identifier (file name). This terminates with a ';'
 	// character followed by the file ID number in ASCII coded decimal ('1').
 	FileIDLength byte
-	// // The interpretation of this field depends as follows on the setting of the
-	// // Directory bit of the File Flags field. If set to ZERO, it shall mean:
-	// //
-	// // − The field shall specify an identification for the file.
-	// // − The characters in this field shall be d-characters or d1-characters, SEPARATOR 1, SEPARATOR 2.
-	// // − The field shall be recorded as specified in 7.5. If set to ONE, it shall mean:
-	// // − The field shall specify an identification for the directory.
-	// // − The characters in this field shall be d-characters or d1-characters, or only a (00) byte, or only a (01) byte.
-	// // − The field shall be recorded as specified in 7.6.
-	//fileID string
+	// The interpretation of this field depends as follows on the setting of the
+	// Directory bit of the File Flags field. If set to ZERO, it shall mean:
+	//
+	// − The field shall specify an identification for the file.
+	// − The characters in this field shall be d-characters or d1-characters, SEPARATOR 1, SEPARATOR 2.
+	// − The field shall be recorded as specified in 7.5. If set to ONE, it shall mean:
+	// − The field shall specify an identification for the directory.
+	// − The characters in this field shall be d-characters or d1-characters, or only a (00) byte, or only a (01) byte.
+	// − The field shall be recorded as specified in 7.6.
+	// fileID string
 }
 
 // PrimaryVolumePart2 represents the Primary Volume Descriptor half after the

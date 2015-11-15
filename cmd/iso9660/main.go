@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/hooklift/iso9660"
 )
 
 func main() {
@@ -43,24 +45,24 @@ func main() {
 			panic(err)
 		}
 
-		//freader := fi.Sys().(io.Reader)
-		//f, err := os.Create(fp)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//defer func() {
-		//	if err := f.Close(); err != nil {
-		//		panic(err)
-		//	}
-		//}()
+		freader := fi.Sys().(io.Reader)
+		f, err := os.Create(fp)
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := f.Close(); err != nil {
+				panic(err)
+			}
+		}()
 
-		//if err := f.Chmod(fi.Mode()); err != nil {
-		//	panic(err)
-		//}
+		if err := f.Chmod(fi.Mode()); err != nil {
+			panic(err)
+		}
 
-		//if _, err := io.Copy(f, freader); err != nil {
-		//	panic(err)
-		//}
+		if _, err := io.Copy(f, freader); err != nil {
+			panic(err)
+		}
 	}
 }
 
