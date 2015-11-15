@@ -29,7 +29,8 @@ type FileStat struct {
 
 // Name returns the file's name.
 func (fi *FileStat) Name() string {
-	return strings.TrimSpace(fi.fileID)
+	name := strings.Split(fi.fileID, ";")[0]
+	return strings.ToLower(name)
 }
 
 // Size returns the file size in bytes

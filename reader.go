@@ -129,19 +129,18 @@ func (r *Reader) Next() (os.FileInfo, error) {
 			break
 		}
 	}
-
-	if drecord.IsDir() {
-		r.queue.Enqueue(drecord)
-	} else {
-		drecord.image = r.image
-	}
-
 	// If there is no more entries in the current directory, dequeue it
 	// and move on the next directory in the queue.
 	if r.read > fi.ExtentLengthBE {
 		r.read = 0
-		r.queue.Dequeue()
 		r.sector = 0
+		r.queue.Dequeue()
+	}
+
+	if drecord.IsDir() && drecord.fileID != "" {
+		r.queue.Enqueue(drecord)
+	} else {
+		drecord.image = r.image
 	}
 
 	return &drecord, nil

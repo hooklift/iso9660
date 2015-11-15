@@ -74,6 +74,6 @@ func TestUnpackChildren(t *testing.T) {
 		assert.Ok(t, err)
 
 		f := fi.(*FileStat)
-		fmt.Printf("->%#v<-\n", f.fileID)
+		fmt.Printf("->%#v<-\n", f.Name())
 	}
 }
