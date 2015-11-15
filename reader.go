@@ -87,22 +87,12 @@ func (r *Reader) Next() (os.FileInfo, error) {
 	}
 
 	// We only dequeue the directory when it does not contain more children
-	// or when it is empty and there is no children to go over.
+	// or when it is empty and there is no children to iterate over.
 	item, err := r.queue.Peek()
 	if err != nil {
 		panic(err)
 	}
 	fi := item.(FileStat)
-
-	fmt.Println(r.sector)
-	// If there is no more entries in the current directory, dequeue it
-	// and move on the next directory in the queue.
-	if r.read > fi.ExtentLengthBE {
-		r.read = 0
-		r.queue.Dequeue()
-		r.sector = 0
-		return &fi, nil
-	}
 
 	if r.sector == 0 {
 		r.sector = fi.ExtentLocationBE
@@ -110,24 +100,22 @@ func (r *Reader) Next() (os.FileInfo, error) {
 
 	var drecord FileStat
 	var len byte
-	// We need this loop to skip parent and self directories: .. and .
+	// This loops exists so we can skip .. and . directories
 	for {
-		// If we are at the end of the sector, move onto the next one.
 		if (r.read % sectorSize) == 0 {
-			r.sector++
 			_, err := r.image.Seek(int64(r.sector*sectorSize), os.SEEK_SET)
 			if err != nil {
 				return nil, ErrCorruptedImage(err)
 			}
+			r.sector++
 		}
 
 		if len, err = r.unpackDRecord(&drecord); err != nil && err != io.EOF {
 			return nil, ErrCorruptedImage(err)
 		}
-		r.read += uint32(len)
 
 		if err == io.EOF {
-			// directory record is empty, sector lost, move onto next sector.
+			// directory record is empty, sector wasted, move onto next sector.
 			rsize := (sectorSize - (r.read % sectorSize))
 			buf := make([]byte, rsize)
 			if err := binary.Read(r.image, binary.BigEndian, buf); err != nil {
@@ -135,15 +123,25 @@ func (r *Reader) Next() (os.FileInfo, error) {
 			}
 			r.read += rsize
 		}
+		r.read += uint32(len)
 
 		if drecord.fileID != "\x00" && drecord.fileID != "\x01" {
-			if drecord.IsDir() {
-				r.queue.Enqueue(drecord)
-			} else {
-				drecord.image = r.image
-			}
 			break
 		}
+	}
+
+	if drecord.IsDir() {
+		r.queue.Enqueue(drecord)
+	} else {
+		drecord.image = r.image
+	}
+
+	// If there is no more entries in the current directory, dequeue it
+	// and move on the next directory in the queue.
+	if r.read > fi.ExtentLengthBE {
+		r.read = 0
+		r.queue.Dequeue()
+		r.sector = 0
 	}
 
 	return &drecord, nil
