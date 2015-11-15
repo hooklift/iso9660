@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/c4milo/gotoolkit"
 )
@@ -75,8 +76,7 @@ func NewReader(rs io.ReadSeeker) (*Reader, error) {
 	}
 }
 
-// Next moves onto the next directory record using breadth-first search one step
-// at the time. It first moves
+// Next moves onto the next directory record.
 func (r *Reader) Next() (os.FileInfo, error) {
 	if r == nil {
 		panic("missing reader instance. Use the constructor to create a Reader instance.")
@@ -115,7 +115,7 @@ func (r *Reader) Next() (os.FileInfo, error) {
 		}
 
 		if err == io.EOF {
-			// directory record is empty, sector wasted, move onto next sector.
+			// directory record is empty, sector space wasted, move onto next sector.
 			rsize := (sectorSize - (r.read % sectorSize))
 			buf := make([]byte, rsize)
 			if err := binary.Read(r.image, binary.BigEndian, buf); err != nil {
@@ -142,6 +142,12 @@ func (r *Reader) Next() (os.FileInfo, error) {
 	}
 
 	if drecord.IsDir() {
+		parent := fi.Name()
+		if parent == "\x00" {
+			parent = "/"
+		}
+		drecord.fileID = filepath.Join(parent, drecord.fileID)
+
 		r.queue.Enqueue(drecord)
 	} else {
 		drecord.image = r.image
