@@ -50,7 +50,7 @@ func (fi *FileStat) ModTime() time.Time {
 
 // IsDir tells whether the file is a directory or not.
 func (fi *FileStat) IsDir() bool {
-	if (fi.FileFlags & isDirectory) == 0 {
+	if (fi.FileFlags & 2) == 2 {
 		return true
 	}
 	return false
@@ -100,9 +100,6 @@ const (
 	// found starting at sector 0x10
 	dataAreaSector = 0x10
 	sectorSize     = 2048
-	// File Flags
-	isDirectory = 1
-	isFile      = 2
 )
 
 // VolumeDescriptor identify the volume, the partitions recorded on the volume,

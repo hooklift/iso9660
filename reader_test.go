@@ -46,27 +46,15 @@ func TestNewReader(t *testing.T) {
 	assert.Equals(t, 1, int(r.pvd.FileStructVersion))
 }
 
-// func TestUnpackRootDRecord(t *testing.T) {
-// 	image, err := os.Open("./fixtures/test.iso")
-// 	defer image.Close()
-// 	reader, err := NewReader(image)
-// 	assert.Ok(t, err)
-//
-// 	_, err = reader.Next()
-// 	assert.Ok(t, err)
-// 	//assert.Equals(t, "PHOTON_20150820", fi.Name())
-//
-// 	// _, err = reader.Next()
-// 	// assert.Ok(t, err)
-// }
-
 func TestUnpackChildren(t *testing.T) {
 	image, err := os.Open("./fixtures/test.iso")
 	defer image.Close()
 	reader, err := NewReader(image)
 	assert.Ok(t, err)
 
+	count := 0
 	for {
+		count++
 		fi, err := reader.Next()
 		if err == io.EOF {
 			break
@@ -74,6 +62,6 @@ func TestUnpackChildren(t *testing.T) {
 		assert.Ok(t, err)
 
 		f := fi.(*FileStat)
-		fmt.Printf("->%#v<-\n", f.Name())
+		fmt.Printf("%d->%#v<-\n", count, f.Name())
 	}
 }
