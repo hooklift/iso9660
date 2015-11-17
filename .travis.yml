@@ -9,3 +9,6 @@ go:
 matrix:
   allow_failures:
     - go: tip
+
+install:
+  - make deps

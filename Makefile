@@ -8,3 +8,4 @@ deps:
 	go get github.com/c4milo/github-release
 	go get github.com/mitchellh/gox
 	go get github.com/docopt/docopt-go
+	go get github.com/c4milo/gotoolkit
