@@ -78,7 +78,7 @@ func NewReader(rs io.ReadSeeker) (*Reader, error) {
 
 // Skip skips the give number of directory records.
 func (r *Reader) Skip(n int) error {
-	var drecord FileStat
+	var drecord File
 	var len byte
 	var err error
 	for i := 0; i < n; i++ {
@@ -103,9 +103,9 @@ func (r *Reader) Next() (os.FileInfo, error) {
 		panic(err)
 	}
 
-	fi := item.(FileStat)
+	f := item.(File)
 	if r.sector == 0 {
-		r.sector = fi.ExtentLocationBE
+		r.sector = f.ExtentLocationBE
 		_, err := r.image.Seek(int64(r.sector*sectorSize), os.SEEK_SET)
 		if err != nil {
 			return nil, ErrCorruptedImage(err)
@@ -117,7 +117,7 @@ func (r *Reader) Next() (os.FileInfo, error) {
 		}
 	}
 
-	var drecord FileStat
+	var drecord File
 	var len byte
 	if (r.read % sectorSize) == 0 {
 		r.sector++
@@ -143,7 +143,7 @@ func (r *Reader) Next() (os.FileInfo, error) {
 	}
 
 	// If there is no more entries in the current directory, dequeue it.
-	if r.read >= fi.ExtentLengthBE {
+	if r.read >= f.ExtentLengthBE {
 		r.read = 0
 		r.sector = 0
 		r.queue.Dequeue()
@@ -156,7 +156,7 @@ func (r *Reader) Next() (os.FileInfo, error) {
 		return r.Next()
 	}
 
-	parent := fi.Name()
+	parent := f.Name()
 	if parent == "\x00" {
 		parent = "/"
 	}
@@ -172,7 +172,7 @@ func (r *Reader) Next() (os.FileInfo, error) {
 }
 
 // unpackDRecord unpacks directory record bits into Go's struct
-func (r *Reader) unpackDRecord(fi *FileStat) (byte, error) {
+func (r *Reader) unpackDRecord(f *File) (byte, error) {
 	// Gets the directory record length
 	var len byte
 	if err := binary.Read(r.image, binary.BigEndian, &len); err != nil {
@@ -189,13 +189,13 @@ func (r *Reader) unpackDRecord(fi *FileStat) (byte, error) {
 		return len, ErrCorruptedImage(err)
 	}
 
-	fi.DirectoryRecord = drecord
+	f.DirectoryRecord = drecord
 	// Gets the name
 	name := make([]byte, drecord.FileIDLength)
 	if err := binary.Read(r.image, binary.BigEndian, name); err != nil {
 		return len, ErrCorruptedImage(err)
 	}
-	fi.fileID = string(name)
+	f.fileID = string(name)
 
 	// Padding field as per section 9.1.12 in ECMA-119
 	if (drecord.FileIDLength % 2) == 0 {
@@ -231,7 +231,7 @@ func (r *Reader) unpackPVD() error {
 	r.pvd.PrimaryVolumePart1 = pvd1
 
 	// Unpack root directory record
-	var drecord FileStat
+	var drecord File
 	if _, err := r.unpackDRecord(&drecord); err != nil {
 		return ErrCorruptedImage(err)
 	}

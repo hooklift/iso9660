@@ -1,8 +1,8 @@
 package iso9660
 
 import (
-	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -46,22 +46,48 @@ func TestNewReader(t *testing.T) {
 	assert.Equals(t, 1, int(r.pvd.FileStructVersion))
 }
 
-func TestUnpackChildren(t *testing.T) {
+func TestUnpacking(t *testing.T) {
 	image, err := os.Open("./fixtures/test.iso")
 	defer image.Close()
 	reader, err := NewReader(image)
 	assert.Ok(t, err)
 
+	tests := []struct {
+		name    string
+		isDir   bool
+		content string
+	}{
+		{"/dir1", true, ""},
+		{"/dir2", true, ""},
+		{"/file.txt", false, "hola amigo\n"},
+		{"/dir1/hello.txt", false, "hello there!"},
+		{"/dir2/dir3", true, ""},
+		{"/dir2/dir3/blah.txt", false, "do you feel me?\n"},
+	}
+
 	count := 0
 	for {
-		count++
 		fi, err := reader.Next()
 		if err == io.EOF {
 			break
 		}
 		assert.Ok(t, err)
 
-		f := fi.(*FileStat)
-		fmt.Printf("%d->%#v<-\n", count, f.Name())
+		f := fi.(*File)
+		assert.Equals(t, tests[count].name, f.Name())
+		assert.Equals(t, tests[count].isDir, f.IsDir())
+
+		rawBytes := f.Sys()
+		if !f.IsDir() {
+			assert.Cond(t, rawBytes != nil, "when it is file, content should not be nil")
+			content, err := ioutil.ReadAll(rawBytes.(io.Reader))
+			assert.Ok(t, err)
+			//fmt.Printf("%s -> %s\n", tests[count].name, content)
+			assert.Equals(t, tests[count].content, string(content[:]))
+		} else {
+			assert.Equals(t, nil, rawBytes)
+		}
+		count++
 	}
+	assert.Equals(t, 6, count)
 }

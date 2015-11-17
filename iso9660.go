@@ -18,9 +18,9 @@ import (
 	"time"
 )
 
-// FileStat represents a concrete implementation of os.FileInfo interface for
-// accessing ISO9660 file stats
-type FileStat struct {
+// File represents a concrete implementation of os.FileInfo interface for
+// accessing ISO 9660 file data
+type File struct {
 	DirectoryRecord
 	fileID string
 	// We have the raw image here only to be able to access file extents
@@ -28,66 +28,70 @@ type FileStat struct {
 }
 
 // Name returns the file's name.
-func (fi *FileStat) Name() string {
-	name := strings.Split(fi.fileID, ";")[0]
+func (f *File) Name() string {
+	name := strings.Split(f.fileID, ";")[0]
 	return strings.ToLower(name)
 }
 
 // Size returns the file size in bytes
-func (fi *FileStat) Size() int64 {
-	return 0
+func (f *File) Size() int64 {
+	return int64(f.ExtentLengthBE)
 }
 
 // Mode returns file's mode and permissions bits.
-func (fi *FileStat) Mode() os.FileMode {
+func (f *File) Mode() os.FileMode {
 	return os.FileMode(0740)
 }
 
 // ModTime returns file's modification time.
-func (fi *FileStat) ModTime() time.Time {
+func (f *File) ModTime() time.Time {
 	return time.Now()
 }
 
 // IsDir tells whether the file is a directory or not.
-func (fi *FileStat) IsDir() bool {
-	if (fi.FileFlags & 2) == 2 {
+func (f *File) IsDir() bool {
+	if (f.FileFlags & 2) == 2 {
 		return true
 	}
 	return false
 }
 
 // Sys returns io.Reader instance pointing to the file's content if it is not a directory, nil otherwise.
-func (fi *FileStat) Sys() interface{} {
-	if fi.IsDir() {
+func (f *File) Sys() interface{} {
+	if f.IsDir() {
 		return nil
 	}
 
+	// if f.ExtentLengthBE <= 0 {
+	// 	return bytes.NewReader([]byte(""))
+	// }
 	// Saves the current position within the ISO image. This is so we can
 	// restore it once the file content is read. By doing this we allow
 	// reader.Next() to keep working normally.
-	curOffset, err := fi.image.Seek(0, os.SEEK_CUR)
+	// curOffset, err := f.image.Seek(0, os.SEEK_CUR)
+	// fmt.Printf("Current offset within image: %d\n", curOffset)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	_, err := f.image.Seek(int64(f.ExtentLocationBE*sectorSize), os.SEEK_SET)
 	if err != nil {
 		panic(err)
 	}
 
-	buf := make([]byte, fi.ExtentLengthBE)
-	_, err = fi.image.Seek(int64(fi.ExtentLocationBE*fi.ExtentLengthBE), os.SEEK_SET)
-	if err != nil {
-		panic(err)
-	}
-
-	err = binary.Read(fi.image, binary.BigEndian, &buf)
+	buffer := make([]byte, f.ExtentLengthBE)
+	err = binary.Read(f.image, binary.BigEndian, buffer)
 	if err != nil {
 		panic(err)
 	}
 
 	// Restores original position within the ISO image after reading file's content.
-	_, err = fi.image.Seek(curOffset, os.SEEK_SET)
-	if err != nil {
-		panic(err)
-	}
+	// _, err = f.image.Seek(curOffset, os.SEEK_SET)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	return bytes.NewReader(buf)
+	return bytes.NewReader(buffer)
 }
 
 const (
