@@ -4,10 +4,12 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/hooklift/assert"
+	"github.com/hooklift/iso9660"
 )
 
 func TestNewReader(t *testing.T) {
@@ -90,4 +92,60 @@ func TestUnpacking(t *testing.T) {
 		count++
 	}
 	assert.Equals(t, 6, count)
+}
+
+func ExampleExamples() {
+	file, err := os.Open("archlinux.iso")
+	if err != nil {
+		panic(err)
+	}
+
+	r, err := iso9660.NewReader(file)
+	if err != nil {
+		panic(err)
+	}
+
+	destPath := "tmp"
+	for {
+		f, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			panic(err)
+		}
+
+		fp := filepath.Join(destPath, fi.Name())
+		if f.IsDir() {
+			if err := os.MkdirAll(fp, f.Mode()); err != nil {
+				panic(err)
+			}
+			continue
+		}
+
+		parentDir, _ := filepath.Split(fp)
+		if err := os.MkdirAll(parentDir, f.Mode()); err != nil {
+			panic(err)
+		}
+
+		freader := f.Sys().(io.Reader)
+		ff, err := os.Create(fp)
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := ff.Close(); err != nil {
+				panic(err)
+			}
+		}()
+
+		if err := ff.Chmod(f.Mode()); err != nil {
+			panic(err)
+		}
+
+		if _, err := io.Copy(ff, freader); err != nil {
+			panic(err)
+		}
+	}
 }
