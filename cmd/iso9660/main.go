@@ -1,17 +1,32 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 
+	"github.com/docopt/docopt-go"
 	"github.com/hooklift/iso9660"
 )
 
+// Version holds the CLI version and is set in compilation time.
+var Version string
+
 func main() {
-	file, err := os.Open("test.iso")
+	usage := `ISO9660 extractor.
+Usage:
+  iso9660 <image-path> <destination-path>
+  iso9660 -h | --help
+  iso9660 --version
+`
+
+	args, err := docopt.Parse(usage, nil, true, Version, false)
+	if err != nil {
+		panic(err)
+	}
+
+	file, err := os.Open(args["<image-path>"].(string))
 	if err != nil {
 		panic(err)
 	}
@@ -21,9 +36,13 @@ func main() {
 		panic(err)
 	}
 
-	destPath := "tmp"
+	destPath := args["<destination-path>"].(string)
+	if destPath == "" {
+		destPath = "."
+	}
+
 	for {
-		fi, err := r.Next()
+		f, err := r.Next()
 		if err == io.EOF {
 			break
 		}
@@ -32,51 +51,38 @@ func main() {
 			panic(err)
 		}
 
-		fp := filepath.Join(destPath, fi.Name())
-		if fi.IsDir() {
-			if err := os.MkdirAll(fp, fi.Mode()); err != nil {
+		fp := filepath.Join(destPath, f.Name())
+		if f.IsDir() {
+			if err := os.MkdirAll(fp, f.Mode()); err != nil {
 				panic(err)
 			}
 			continue
 		}
 
 		parentDir, _ := filepath.Split(fp)
-		if err := os.MkdirAll(parentDir, fi.Mode()); err != nil {
+		if err := os.MkdirAll(parentDir, f.Mode()); err != nil {
 			panic(err)
 		}
 
-		freader := fi.Sys().(io.Reader)
-		f, err := os.Create(fp)
+		fmt.Printf("Extracting %s...\n", fp)
+
+		freader := f.Sys().(io.Reader)
+		ff, err := os.Create(fp)
 		if err != nil {
 			panic(err)
 		}
 		defer func() {
-			if err := f.Close(); err != nil {
+			if err := ff.Close(); err != nil {
 				panic(err)
 			}
 		}()
 
-		if err := f.Chmod(fi.Mode()); err != nil {
+		if err := ff.Chmod(f.Mode()); err != nil {
 			panic(err)
 		}
 
-		if _, err := io.Copy(f, freader); err != nil {
+		if _, err := io.Copy(ff, freader); err != nil {
 			panic(err)
 		}
 	}
-}
-
-// Sanitizes name to avoid overwriting sensitive system files when unarchiving
-func sanitize(name string) string {
-	// Gets rid of volume drive label in Windows
-	if len(name) > 1 && name[1] == ':' && runtime.GOOS == "windows" {
-		name = name[2:]
-	}
-
-	name = filepath.Clean(name)
-	name = filepath.ToSlash(name)
-	for strings.HasPrefix(name, "../") {
-		name = name[3:]
-	}
-	return name
 }
