@@ -1,4 +1,7 @@
 # iso9660
+[![GoDoc](https://godoc.org/github.com/hooklift/iso9660?status.svg)](https://godoc.org/github.com/hooklift/iso9660)
+[![Build Status](https://travis-ci.org/hooklift/iso9660.svg?branch=master)](https://travis-ci.org/hooklift/iso9660)
+
 Go library to extract data from ISO9660 images.
 
 ### Not supported
