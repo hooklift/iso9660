@@ -1,6 +1,7 @@
 // Package iso9660 implements ECMA-119 standard, also known as ISO 9660.
 //
 // References:
+//
 // * https://en.wikipedia.org/wiki/ISO_9660
 // * http://alumnus.caltech.edu/~pje/iso9660.html
 // * http://users.telenet.be/it3.consultants.bvba/handouts/ISO9960.html
