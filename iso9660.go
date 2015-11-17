@@ -46,9 +46,14 @@ func (f *File) Size() int64 {
 	return int64(f.ExtentLengthBE)
 }
 
-// Mode returns file's mode and permissions bits.
+// Mode returns file's mode and permissions bits. Since we don't yet support
+// Rock Ridge extensions we cannot extract POSIX permissions and the rest of the
+// normal metadata. So, right we return 0740 for directories and 0640 for files.
 func (f *File) Mode() os.FileMode {
-	return os.FileMode(0740)
+	if f.IsDir() {
+		return os.FileMode(0740)
+	}
+	return os.FileMode(0640)
 }
 
 // ModTime returns file's modification time.
@@ -76,13 +81,12 @@ func (f *File) Sys() interface{} {
 	// Saves the current position within the ISO image. This is so we can
 	// restore it once the file content is read. By doing this we allow
 	// reader.Next() to keep working normally.
-	// curOffset, err := f.image.Seek(0, os.SEEK_CUR)
-	// fmt.Printf("Current offset within image: %d\n", curOffset)
-	// if err != nil {
-	// 	panic(err)
-	// }
+	curOffset, err := f.image.Seek(0, os.SEEK_CUR)
+	if err != nil {
+		panic(err)
+	}
 
-	_, err := f.image.Seek(int64(f.ExtentLocationBE*sectorSize), os.SEEK_SET)
+	_, err = f.image.Seek(int64(f.ExtentLocationBE*sectorSize), os.SEEK_SET)
 	if err != nil {
 		panic(err)
 	}
@@ -94,10 +98,10 @@ func (f *File) Sys() interface{} {
 	}
 
 	// Restores original position within the ISO image after reading file's content.
-	// _, err = f.image.Seek(curOffset, os.SEEK_SET)
-	// if err != nil {
-	// 	panic(err)
-	// }
+	_, err = f.image.Seek(curOffset, os.SEEK_SET)
+	if err != nil {
+		panic(err)
+	}
 
 	return bytes.NewReader(buffer)
 }
