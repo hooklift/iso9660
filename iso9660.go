@@ -3,11 +3,17 @@
 // References:
 //
 // * https://en.wikipedia.org/wiki/ISO_9660
+//
 // * http://alumnus.caltech.edu/~pje/iso9660.html
+//
 // * http://users.telenet.be/it3.consultants.bvba/handouts/ISO9960.html
+//
 // * http://www.ecma-international.org/publications/files/ECMA-ST/Ecma-119.pdf
+//
 // * http://www.drdobbs.com/database/inside-the-iso-9660-filesystem-format/184408899
+//
 // * http://www.cdfs.com
+//
 // * http://wiki.osdev.org/ISO_9660
 package iso9660
 
