@@ -94,7 +94,7 @@ func TestUnpacking(t *testing.T) {
 	assert.Equals(t, 6, count)
 }
 
-func ReaderExamples() {
+func ExampleReader() {
 	file, err := os.Open("archlinux.iso")
 	if err != nil {
 		panic(err)
