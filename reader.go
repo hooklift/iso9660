@@ -34,7 +34,7 @@ type Reader struct {
 	read uint32
 }
 
-// NewReader creates a new ISO9660 reader.
+// NewReader creates a new ISO 9660 image reader.
 func NewReader(rs io.ReadSeeker) (*Reader, error) {
 	// Starts reading from image data area
 	sector := dataAreaSector
@@ -76,7 +76,7 @@ func NewReader(rs io.ReadSeeker) (*Reader, error) {
 	}
 }
 
-// Skip skips the give number of directory records.
+// Skip skips the given number of directory records.
 func (r *Reader) Skip(n int) error {
 	var drecord File
 	var len byte
@@ -90,7 +90,9 @@ func (r *Reader) Skip(n int) error {
 	return nil
 }
 
-// Next moves onto the next directory record.
+// Next moves onto the next directory record present in the image.
+// It does not use the Path Table since the goal is to read everything
+// from the ISO image.
 func (r *Reader) Next() (os.FileInfo, error) {
 	if r.queue.IsEmpty() {
 		return nil, io.EOF
