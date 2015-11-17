@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/hooklift/assert"
-	"github.com/hooklift/iso9660"
 )
 
 func TestNewReader(t *testing.T) {
@@ -76,6 +75,7 @@ func TestUnpacking(t *testing.T) {
 		assert.Ok(t, err)
 
 		f := fi.(*File)
+		//fmt.Printf("%s\n", tests[count].name)
 		assert.Equals(t, tests[count].name, f.Name())
 		assert.Equals(t, tests[count].isDir, f.IsDir())
 
@@ -94,13 +94,35 @@ func TestUnpacking(t *testing.T) {
 	assert.Equals(t, 6, count)
 }
 
+// func TestBigImage(t *testing.T) {
+// 	image, err := os.Open("./fixtures/test.iso.arch")
+// 	defer image.Close()
+// 	reader, err := NewReader(image)
+// 	assert.Ok(t, err)
+//
+// 	count := 0
+// 	for {
+// 		fi, err := reader.Next()
+// 		if err == io.EOF {
+// 			break
+// 		}
+// 		assert.Ok(t, err)
+//
+// 		f := fi.(*File)
+// 		fmt.Printf("%s\n", f.Name())
+// 		count++
+// 	}
+//
+// 	assert.Equals(t, 121, count)
+// }
+
 func ExampleReader() {
 	file, err := os.Open("archlinux.iso")
 	if err != nil {
 		panic(err)
 	}
 
-	r, err := iso9660.NewReader(file)
+	r, err := NewReader(file)
 	if err != nil {
 		panic(err)
 	}
@@ -116,7 +138,7 @@ func ExampleReader() {
 			panic(err)
 		}
 
-		fp := filepath.Join(destPath, fi.Name())
+		fp := filepath.Join(destPath, f.Name())
 		if f.IsDir() {
 			if err := os.MkdirAll(fp, f.Mode()); err != nil {
 				panic(err)
