@@ -12,8 +12,7 @@ https://github.com/hooklift/iso9660/blob/master/cmd/iso9660/main.go
 
 ### Not supported
 * Reading files recorded in interleave mode
-* Multi-extent or reading files larger than 4GB
-* Joliet extension
+* Multi-extent or reading individual files larger than 4GB
+* Joliet extensions, meaning that file names longer than 32 characters are going to be truncated. Unicode characters are not going to be properly decoded either.
 * Multisession extension
-* Rock Ridge extension
-* El Torito extension
+* Rock Ridge extension, making unable to return recorded POSIX permissions, timestamps as well as owner and group for files and directories.
