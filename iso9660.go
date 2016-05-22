@@ -18,8 +18,6 @@
 package iso9660
 
 import (
-	"bytes"
-	"encoding/binary"
 	"io"
 	"os"
 	"strings"
@@ -32,7 +30,7 @@ type File struct {
 	DirectoryRecord
 	fileID string
 	// We have the raw image here only to be able to access file extents
-	image io.ReadSeeker
+	image *os.File
 }
 
 // Name returns the file's name.
@@ -75,35 +73,7 @@ func (f *File) Sys() interface{} {
 		return nil
 	}
 
-	// if f.ExtentLengthBE <= 0 {
-	// 	return bytes.NewReader([]byte(""))
-	// }
-	// Saves the current position within the ISO image. This is so we can
-	// restore it once the file content is read. By doing this we allow
-	// reader.Next() to keep working normally.
-	curOffset, err := f.image.Seek(0, os.SEEK_CUR)
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = f.image.Seek(int64(f.ExtentLocationBE*sectorSize), os.SEEK_SET)
-	if err != nil {
-		panic(err)
-	}
-
-	buffer := make([]byte, f.ExtentLengthBE)
-	err = binary.Read(f.image, binary.BigEndian, buffer)
-	if err != nil {
-		panic(err)
-	}
-
-	// Restores original position within the ISO image after reading file's content.
-	_, err = f.image.Seek(curOffset, os.SEEK_SET)
-	if err != nil {
-		panic(err)
-	}
-
-	return bytes.NewReader(buffer)
+	return io.NewSectionReader(f.image, int64(f.ExtentLocationBE*sectorSize), int64(f.ExtentLengthBE))
 }
 
 const (
