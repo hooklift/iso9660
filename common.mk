@@ -15,7 +15,7 @@ install:
 compile:
 	@rm -rf build/
 	@gox $(LDFLAGS) \
-	-os="darwin" \
+	-osarch="darwin/amd64" \
 	-os="linux" \
 	-os="solaris" \
 	-os="freebsd" \
@@ -36,7 +36,7 @@ release: dist
 	@latest_tag=$$(git describe --tags `git rev-list --tags --max-count=1`); \
 	comparison="$$latest_tag..HEAD"; \
 	if [ -z "$$latest_tag" ]; then comparison=""; fi; \
-	changelog=$$(git log $$comparison --oneline --no-merges --reverse); \
+	changelog=$$(git log $$comparison --oneline --no-merges); \
 	github-release $(GHACCOUNT)/$(NAME) $(VERSION) $(BRANCH) "**Changelog**<br/>$$changelog" 'dist/*'; \
 	git pull
 
