@@ -72,13 +72,14 @@ Usage:
 			panic(err)
 		}
 		
-		if _, err := io.Copy(ff, freader); err != nil {
+		_, err = io.Copy(ff, freader)
+		
+		cerr := ff.Close() // With or without an error from Copy, we want to attempt Close.
+		
+		if err != nil { // Panic with Copy's err.
 			panic(err)
+		} else if cerr != nil {
+			panic(cerr)
 		}
-
-		if err := ff.Close(); err != nil {
-			panic(err)
-		}
-
 	}
 }
