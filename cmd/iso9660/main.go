@@ -71,14 +71,14 @@ Usage:
 		if err != nil {
 			panic(err)
 		}
-		defer func() {
-			if err := ff.Close(); err != nil {
-				panic(err)
-			}
-		}()
-
+		
 		if _, err := io.Copy(ff, freader); err != nil {
 			panic(err)
 		}
+
+		if err := ff.Close(); err != nil {
+			panic(err)
+		}
+
 	}
 }
