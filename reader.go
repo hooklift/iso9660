@@ -1,14 +1,13 @@
 package iso9660
 
 import (
+	"container/list"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-
-	"github.com/c4milo/gotoolkit"
 )
 
 var (
@@ -27,7 +26,7 @@ type Reader struct {
 	// Copy of unencoded Primary Volume Descriptor
 	pvd PrimaryVolume
 	// Queue used to walk through file system iteratively
-	queue gotoolkit.Queue
+	queue *list.List
 	// Current sector
 	sector uint32
 	// Current bytes read from current sector.
@@ -60,7 +59,7 @@ func NewReader(rs *os.File) (*Reader, error) {
 
 			reader := new(Reader)
 			reader.image = rs
-			reader.queue = new(gotoolkit.SliceQueue)
+			reader.queue = list.New()
 
 			if err := reader.unpackPVD(); err != nil {
 				return nil, ErrCorruptedImage(err)
@@ -94,18 +93,18 @@ func (r *Reader) Skip(n int) error {
 // It does not use the Path Table since the goal is to read everything
 // from the ISO image.
 func (r *Reader) Next() (os.FileInfo, error) {
-	if r.queue.IsEmpty() {
+	if r.queue.Front() == nil {
 		return nil, io.EOF
 	}
 
 	// We only dequeue the directory when it does not contain more children
 	// or when it is empty and there is no children to iterate over.
-	item, err := r.queue.Peek()
-	if err != nil {
-		panic(err)
+	item := r.queue.Front()
+	if item == nil {
+		panic(errors.New("unable to peek element, queue is empty"))
 	}
 
-	f := item.(File)
+	f := item.Value.(File)
 	if r.sector == 0 {
 		r.sector = f.ExtentLocationBE
 		_, err := r.image.Seek(int64(r.sector*sectorSize), os.SEEK_SET)
@@ -121,6 +120,7 @@ func (r *Reader) Next() (os.FileInfo, error) {
 
 	var drecord File
 	var len byte
+	var err error
 	if (r.read % sectorSize) == 0 {
 		r.sector++
 		_, err := r.image.Seek(int64(r.sector*sectorSize), os.SEEK_SET)
@@ -148,7 +148,7 @@ func (r *Reader) Next() (os.FileInfo, error) {
 	if r.read >= f.ExtentLengthBE {
 		r.read = 0
 		r.sector = 0
-		r.queue.Dequeue()
+		r.queue.Remove(item)
 	}
 
 	// End of directory listing, drecord is empty so we don't bother
@@ -165,7 +165,7 @@ func (r *Reader) Next() (os.FileInfo, error) {
 	drecord.fileID = filepath.Join(parent, drecord.fileID)
 
 	if drecord.IsDir() {
-		r.queue.Enqueue(drecord)
+		r.queue.PushBack(drecord)
 	} else {
 		drecord.image = r.image
 	}
@@ -238,7 +238,7 @@ func (r *Reader) unpackPVD() error {
 		return ErrCorruptedImage(err)
 	}
 	r.pvd.DirectoryRecord = drecord.DirectoryRecord
-	r.queue.Enqueue(drecord)
+	r.queue.PushBack(drecord)
 
 	// Unpack second half
 	var pvd2 PrimaryVolumePart2
