@@ -30,7 +30,7 @@ type File struct {
 	DirectoryRecord
 	fileID string
 	// We have the raw image here only to be able to access file extents
-	image *os.File
+	image *ImageReader
 }
 
 // Name returns the file's name.

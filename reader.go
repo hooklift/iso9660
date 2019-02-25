@@ -19,11 +19,23 @@ var (
 	ErrCorruptedImage = func(err error) error { return fmt.Errorf("corrupted-image: %s", err) }
 )
 
+type ImageReader struct {
+	io.ReadSeeker
+}
+
+func (ir *ImageReader) ReadAt(p []byte, off int64) (n int, err error) {
+	// 0 means io.SeekStart. Not using constant for backwards compatibility.
+	if _, err = ir.Seek(off, 0); err == nil {
+		n, err = ir.Read(p)
+	}
+	return
+}
+
 // Reader defines the state of the ISO9660 image reader. It needs to be instantiated
 // from its constructor.
 type Reader struct {
 	// File descriptor to the opened ISO image
-	image *os.File
+	image *ImageReader
 	// Copy of unencoded Primary Volume Descriptor
 	pvd PrimaryVolume
 	// Queue used to walk through file system iteratively
@@ -35,7 +47,7 @@ type Reader struct {
 }
 
 // NewReader creates a new ISO 9660 image reader.
-func NewReader(rs *os.File) (*Reader, error) {
+func NewReader(rs io.ReadSeeker) (*Reader, error) {
 	// Starts reading from image data area
 	sector := dataAreaSector
 	// Iterates over volume descriptors until it finds the primary volume descriptor
@@ -59,7 +71,7 @@ func NewReader(rs *os.File) (*Reader, error) {
 			}
 
 			reader := new(Reader)
-			reader.image = rs
+			reader.image = &ImageReader{rs}
 			reader.queue = new(gotoolkit.SliceQueue)
 
 			if err := reader.unpackPVD(); err != nil {
