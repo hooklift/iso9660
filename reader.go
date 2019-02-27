@@ -19,11 +19,11 @@ var (
 	ErrCorruptedImage = func(err error) error { return fmt.Errorf("corrupted-image: %s", err) }
 )
 
-type ImageReader struct {
+type imageReader struct {
 	io.ReadSeeker
 }
 
-func (ir *ImageReader) ReadAt(p []byte, off int64) (n int, err error) {
+func (ir *imageReader) ReadAt(p []byte, off int64) (n int, err error) {
 	// 0 means io.SeekStart. Not using constant for backwards compatibility.
 	if _, err = ir.Seek(off, 0); err == nil {
 		n, err = ir.Read(p)
@@ -35,7 +35,7 @@ func (ir *ImageReader) ReadAt(p []byte, off int64) (n int, err error) {
 // from its constructor.
 type Reader struct {
 	// File descriptor to the opened ISO image
-	image *ImageReader
+	image *imageReader
 	// Copy of unencoded Primary Volume Descriptor
 	pvd PrimaryVolume
 	// Queue used to walk through file system iteratively
@@ -71,7 +71,7 @@ func NewReader(rs io.ReadSeeker) (*Reader, error) {
 			}
 
 			reader := new(Reader)
-			reader.image = &ImageReader{rs}
+			reader.image = &imageReader{rs}
 			reader.queue = new(gotoolkit.SliceQueue)
 
 			if err := reader.unpackPVD(); err != nil {
