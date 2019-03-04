@@ -26,7 +26,7 @@ type imageReader struct {
 func (ir *imageReader) ReadAt(p []byte, off int64) (n int, err error) {
 	// 0 means io.SeekStart. Not using constant for backwards compatibility.
 	if _, err = ir.Seek(off, 0); err == nil {
-		n, err = ir.Read(p)
+		n, err = io.ReadFull(ir, p)
 	}
 	return
 }
