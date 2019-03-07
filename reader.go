@@ -24,9 +24,26 @@ type imageReader struct {
 }
 
 func (ir *imageReader) ReadAt(p []byte, off int64) (n int, err error) {
-	// 0 means io.SeekStart. Not using constant for backwards compatibility.
+	// If the underlying ReadSeeker happen to implement ReadAt, let's use it.
+	if readerAt, ok := ir.ReadSeeker.(io.ReaderAt); ok {
+		return readerAt.ReadAt(p, off)
+	}
+	// If not we are going to emulate it with Seeking and Reading.
+	// ReadAt should not affect the Seeker's position,
+	// thus we need to get the current position first, and Seek back to it after we're done.
+	// 1 means io.SeekCurrent. Not using constant for backwards compatibility.
+	// 0 means io.SeekStart.
+	if curPos, err := ir.Seek(0, 1); err == nil {
+		// We can only Seek back later if we could get the current position
+		defer ir.Seek(curPos, 0)
+	}
 	if _, err = ir.Seek(off, 0); err == nil {
-		n, err = ir.Read(p)
+		// ReadAt should fill the buffer if there are no errors in the stream, so let's use ReadFull.
+		n, err = io.ReadFull(ir, p)
+		if err == io.ErrUnexpectedEOF {
+			// ReadAt should return EOF instead of ErrUnexpectedEOF
+			err = io.EOF
+		}
 	}
 	return
 }
